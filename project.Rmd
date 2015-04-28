@@ -1,0 +1,91 @@
+---
+title: 'writeup project: machine learning'
+author: "Caxixi"
+date: "Tuesday, April 21, 2015"
+output: html_document
+---
+
+R version3.11
+RStudio version  0.98.1056
+
+#introduction#
+
+Data was collected from accelerometers on the belt, forearm, arm, and barbell of 6 participant performing barbell lifts correctly (A) and incorrectly in four different ways (B, C, D, E, see details at: http://groupware.les.inf.puc-rio.br/har, the section on the Weight Lifting Exercise Dataset). We are asked to build a machine learning model that would predict, based on the output from the accelerators, the way the lifts were performed.   
+
+#building the model#
+
+Calling the libraries used:
+```{r}
+library (caret)
+library(randomForest)
+```
+
+Downloading and reading the data used to build the model:
+```{r}
+download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "training.cvs")
+data<-read.csv("training.cvs", header = TRUE, na.strings = c("NA", ""))
+```
+
+Breaking the data to training and testing:
+```{r}
+set.seed(42)
+inTrain <- createDataPartition(y=data$classe, p=0.7, list=FALSE)
+train_part <- data[inTrain, ]; test_part <- data[-inTrain, ]
+dim(train_part); dim(test_part)
+```
+
+These are many variables, but turned out many of them are almost all missing data:
+
+```{r checking for NA}
+missing_values<- sapply(train_part, function(x) {sum(is.na(x))})
+table(missing_values)
+```
+
+Those variables are presumably not very helpful, so I opt to ignore them. Creating a data frame without those columns:
+
+```{r dataset with no missing values}
+full_cols<-names(missing_values[missing_values==0])
+train_part_a<-train_part[, names(data) %in% full_cols]
+```                        
+
+In addition, looking at the names of the columns, columns 1 to 7 contain data that are not expected to be related to the outcome, and I opt to remove them as well.
+```{r}
+train_part_b<-train_part_a[, 8:60]
+```
+
+Ideally, one would go through each of those variable, evaluate and perhaps pre-process them. However, this is not very practical with so many variables and my limited mathematical background. The group that gathered this data set applied a data selection method based on correlation (M. A. Hall, Correlation-based Feature Subset Selection for Machine Learning. PhD thesis, Department of Computer Science, University of Waikato, Hamilton, New Zealand, Apr. 1999). Indeed, there are many cross - correlations within this data set:
+
+```{r t}
+corr<-abs(cor(train_part_b[,-53]))
+diag(corr)<-0 # not counting later correlation between a varialbe and itself
+high_corr<-sum(corr>0.8)
+```
+
+There are `r high_corr` instances of variable highly correlated with each other in this dataset, which could mean some variable can be ignored or comvines somehow. Indeed the original work made a good prediction relaying on 17 variables only. However, I, personally, am not familiar with that method, and realize that, in principle, even with highly correlated variable, the small fraction of data that are not correlated could be a key to prediction. I therefore opt to use all the 57 variables.
+
+Sampling some of those variables for inspection:
+```{r}
+par(mfrow=c(2,2))
+plot(train_part_b[,1]); plot(train_part_b[,11]); plot(train_part_b[,21]);plot(train_part_b[,30])
+```
+
+Looks like many of the variables are not of normal distribution, but kind of grouped in various way. Intuitively, this suggest to me a tree model would be a good choice. To increase the accuracy of the model, I opted to do a random forest model, that create several trees and consider them all in deciding on the final tree (I assume by majority vote but could not find for sure).
+
+```{r, CACHE=TRUE}
+model = train(classe~., method="rf", data=train_part_b)
+model
+```
+
+To check how well the model fits the out-of-sample data, I'll apply it to the fraction of the data that was separated initially and save under the name "test_part". However, first, test_part data frame has to be processed the same way the "train_part" data frame, the one that was used to build the model, was processed. 
+```{r}
+test_part_a<- test_part[, names(data) %in% full_cols]
+test_part_b<-test_part_a[, 8:60]
+```
+
+Predicting:
+```{r}
+test_predictions <- predict(model, test_part_b)
+confusionMatrix(test_predictions, test_part_b$classe)
+```
+
+As expected, some attempts within the test dataset were misclassified, but still a substantial accuracy!
